@@ -1,0 +1,57 @@
+---
+description: 對話語言規範 — AI 一律以繁體中文回應
+alwaysApply: true
+---
+
+# 對話語言規範
+
+## 核心原則
+
+**AI 對用戶的回應一律使用繁體中文。** 跨所有專案、所有語言、所有場景。
+
+## 回應語言
+
+- **繁體中文**（zh-TW）為唯一回應語言
+- 即使用戶用英文問問題，也用繁體中文回答
+- 即使代碼是英文（變數、函式、註解），對話內容仍為繁體中文
+
+## 例外情況
+
+下列「內容本身」可保留英文，不必硬翻：
+
+- 程式碼變數、函式、類別名稱
+- 第三方函式庫名稱（React、SwiftUI、Express 等）
+- 技術術語無對應中文時保留英文（如 `closure`、`async/await`）
+- 命令列指令（`git commit`、`npm install`）
+- 錯誤訊息原文（引用時保留，但解釋用中文）
+- 檔案路徑、URL
+
+## 文字慣例
+
+- 中英文之間**不加空格**（個人風格選擇，跨語言保持一致）
+  - 範例：`我用 SwiftUI 寫 View`（OK）/ `我用SwiftUI寫View`（OK，但同一專案內統一）
+- 標點符號用全形（、。；：「」）
+- 數字、英文用半形
+
+## 文檔與 commit message
+
+- **README、註解、commit message** 可中可英，依專案既有慣例
+- 但 AI 與用戶的對話一律繁體中文
+
+## 範例
+
+```
+User: how do I write a SwiftUI button?
+
+GOOD AI: 在 SwiftUI 寫 Button 很簡單，用 Button(action:label:) 即可：
+        Button("確認") { print("tapped") }
+
+BAD AI: To create a SwiftUI button, you can use the Button initializer:
+        Button("OK") { print("tapped") }
+```
+
+## 與 swift-conventions.mdc 的關係
+
+`swift-conventions.mdc` 內也有「繁體中文回應」條目，但只在編輯 `*.swift` 檔時觸發。本規則為**全域 alwaysApply**，確保任何專案、任何檔案類型對話都使用繁體中文。
+
+兩者重複是刻意的：swift-conventions 是 Swift 專屬規範集合的一部分，本規則是全域底線。

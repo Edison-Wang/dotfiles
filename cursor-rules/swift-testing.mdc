@@ -1,0 +1,240 @@
+---
+description: Swift 測試規範 — XCTest / Swift Testing 選用、命名、Mock 注入、SwiftUI 不測 body
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# 測試規範
+
+## 何時必須寫測試
+
+- **公開 API / Protocol 預設要有測試**
+- **業務邏輯**（驗證、計算、資料轉換）必測
+- **Bug fix 後必加 regression test**（防止再次出現）
+- **跨模組整合點**（Service ↔ Repository、ViewModel ↔ Service）必測
+
+## 何時可不寫
+
+- 純 UI View（SwiftUI body）
+- 簡單 Model（純資料 struct，無業務邏輯）
+- Apple SDK 包裝層（已被 Apple 測過）
+
+## 框架選用
+
+- **新專案、deployment target iOS 16+**：用 **Swift Testing**（`@Test`、`#expect`）
+- **既有專案大量 XCTest**：保持 XCTest，新測試也用 XCTest 維持一致性
+- **混用允許**：但同一個 target 內盡量統一
+
+## 命名規範
+
+### Swift Testing
+
+```swift
+@Test("空字串應該回傳驗證錯誤")
+func validateEmptyString() {
+    let result = validator.validate("")
+    #expect(result == .failure(.empty))
+}
+
+@Test("超過上限應該回傳上限錯誤", arguments: [101, 999, Int.max])
+func validateOverLimit(_ value: Int) {
+    #expect(validator.validate(value) == .failure(.overLimit))
+}
+```
+
+### XCTest
+
+格式：`test_<情境>_<預期結果>`
+
+```swift
+func test_validateEmptyString_returnsEmptyError() {
+    let result = validator.validate("")
+    XCTAssertEqual(result, .failure(.empty))
+}
+
+func test_loadBalance_whenNetworkFails_setsErrorState() async {
+    // ...
+}
+```
+
+## Mock 注入（呼應 swift-mvvm.mdc）
+
+- **建構子注入 Protocol**，測試時替換為 Mock
+- **禁止在測試中 stub `.shared`**（除全域常駐單例如 ThemeManager）
+- Mock 命名：`MockXxx` 或 `XxxStub`（前者可驗證呼叫、後者只回傳固定值）
+
+```swift
+protocol WalletServicing {
+    func fetchBalance() async throws -> Decimal
+}
+
+final class MockWalletService: WalletServicing {
+    var stubbedBalance: Decimal = 0
+    var fetchCallCount = 0
+
+    func fetchBalance() async throws -> Decimal {
+        fetchCallCount += 1
+        return stubbedBalance
+    }
+}
+
+@Test func loadBalance_callsService() async {
+    let mock = MockWalletService()
+    mock.stubbedBalance = 100
+    let viewModel = WalletViewModel(service: mock)
+
+    await viewModel.loadBalance()
+
+    #expect(viewModel.balance == 100)
+    #expect(mock.fetchCallCount == 1)
+}
+```
+
+## SwiftUI 測試策略（四種型態，分工明確）
+
+不要對 SwiftUI `body` 寫傳統單元測試（脆弱、Apple 內部變動就壞）。改用以下分工：
+
+| 型態 | 工具 | 測什麼 | 強制 / 選用 |
+|---|---|---|---|
+| 1. 業務邏輯 | XCTest / Swift Testing + Mock | ViewModel、Service、純邏輯 function | **強制** |
+| 2. 用戶流程 | XCUITest | 跨 View 關鍵流程（登入、結帳、付款） | **選用** |
+| 3. 視覺回歸 | Snapshot Test（pointfreeco/swift-snapshot-testing）| 元件外觀（layout、顏色、字體） | **選用** |
+| 4. 結構邏輯 | ViewInspector | View 條件渲染（loading/error/empty/success 切換）| **選用** |
+
+### 強制 vs 選用分界
+
+**強制（不寫會踩雷）**：
+- 業務邏輯測試（ViewModel / Service / 純邏輯 function）
+- Bug fix 後的 regression test
+- 公開 API / Protocol
+
+**選用（依專案階段、需求加）**：
+- 三種 UI 測試（XCUITest / Snapshot / ViewInspector）全部選用
+- MVP 階段可以全部不寫，先把業務邏輯測扎實再說
+
+### 何時該補 UI 測試
+
+雖然選用，但下列情境**強烈建議**加：
+
+| 情境 | 建議加哪種 |
+|---|---|
+| 關鍵流程上線後（付款、登入、註冊）出錯會掉用戶 | XCUITest |
+| 元件庫要跨多個 feature 復用 | Snapshot |
+| 品牌色 / 字體 / 間距絕對不能跑掉 | Snapshot |
+| 一個 View 內條件分支超過 3 種（loading / error / empty / success / 其他）| ViewInspector |
+| 多人協作、UI 改版頻繁、怕改壞 | Snapshot + 關鍵流程 XCUITest |
+
+### 為什麼 UI 測試默認選用
+
+1. **成本高**：XCUITest 跑得慢、Snapshot 要維護基準圖、ViewInspector 要學語法
+2. **變動大**：UI 改版頻率高，UI 測試壞掉頻率也高，維護成本會吃掉時間
+3. **業務邏輯測試已涵蓋大部分風險**：ViewModel 測扎實，UI 只是顯示
+
+### XCUITest 範例
+
+```swift
+final class CheckoutFlowUITests: XCTestCase {
+    func test_checkout_completesSuccessfully() {
+        let app = XCUIApplication()
+        app.launch()
+
+        app.buttons["商品_iPhone"].tap()
+        app.buttons["加入購物車"].tap()
+        app.buttons["前往結帳"].tap()
+        app.textFields["收件地址"].typeText("台北市...")
+        app.buttons["確認付款"].tap()
+
+        XCTAssertTrue(app.staticTexts["訂單成立"].waitForExistence(timeout: 5))
+    }
+}
+```
+
+XCUITest 守則：
+- 每個 element 用 `.accessibilityIdentifier(_:)` 標 ID，不靠文字找（多語系會壞）
+- 等待元素用 `waitForExistence(timeout:)`，不寫 `Thread.sleep`
+- 測試資料用獨立帳號 / sandbox 環境，不打 production
+
+### Snapshot Test 範例
+
+```swift
+import SnapshotTesting
+
+func test_walletCard_appearance() {
+    let view = WalletCard(balance: 1234.56, currency: "USD")
+        .frame(width: 320, height: 80)
+
+    assertSnapshot(of: view, as: .image)
+    assertSnapshot(of: view, as: .image(traits: .init(userInterfaceStyle: .dark)))
+}
+```
+
+Snapshot 守則：
+- **基準圖納入版控**（`__Snapshots__/`），CI 跑時比對
+- 變更外觀後 review 基準圖差異再 commit
+- 元件用固定假資料，避免每次資料變就紅
+
+### ViewInspector 範例
+
+```swift
+import ViewInspector
+
+func test_walletCard_showsZeroBalance_whenNoData() throws {
+    let view = WalletCard(balance: 0)
+    let text = try view.inspect().find(text: "0.00")
+    XCTAssertNotNil(text)
+}
+```
+
+ViewInspector 守則：
+- 用於驗證「條件分支對不對」，不驗證精確 layout（用 Snapshot）
+- 不要對每個 sub-view 都寫，只測有意義的條件邏輯
+
+### 分工原則
+
+```
+業務邏輯 (80% 測試量) → ViewModel / Service 單元測試
+   ↓
+結構分支 (10%)       → ViewInspector（如有條件渲染）
+   ↓
+視覺呈現 (5%)        → Snapshot（可復用元件）
+   ↓
+用戶流程 (5%)        → XCUITest（關鍵 happy path）
+```
+
+數字是參考分布，重點是**先把業務邏輯測扎實**，UI 層的測試是補強，不是主力。
+
+### 預覽不算測試
+
+`#Preview` 是開發工具，是「即時看效果」用的，不是自動化測試。但可以從 `#Preview` 拷貝參數出來給 Snapshot Test 用，省工。
+
+## 測試結構（AAA / Given-When-Then）
+
+```swift
+@Test func transferAmount_validInput_succeeds() async {
+    // Given (Arrange)
+    let mock = MockWalletService()
+    let viewModel = WalletViewModel(service: mock)
+
+    // When (Act)
+    await viewModel.transfer(amount: 50, to: "addr1")
+
+    // Then (Assert)
+    #expect(viewModel.lastTransferStatus == .success)
+}
+```
+
+每個測試只測**一件事**，斷言 1-3 個為佳。
+
+## 禁止行為
+
+- **禁止**測試裡寫 `Thread.sleep` 或 `try await Task.sleep`（除非真的測 timeout 行為）
+- **禁止**測試之間共享可變狀態（每個 test 獨立）
+- **禁止**測試打真實網路 / 資料庫（必須 Mock）
+- **禁止**註解掉失敗的測試（修好或刪掉，不要留壞測試）
+
+## 覆蓋率目標
+
+- 業務邏輯層：80%+
+- Service / Repository：70%+
+- ViewModel：60%+（UI binding 部分難測，可放低）
+- 全專案總體：不強制數字，重點是「該測的有測」

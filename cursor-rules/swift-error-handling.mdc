@@ -1,0 +1,208 @@
+---
+description: Swift 錯誤處理規範 — 自定 Error、throws vs Result、禁止吞 error、用戶可讀訊息
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# 錯誤處理規範
+
+## 核心原則
+
+- **每個錯誤都要被處理**：log、轉換、或顯示給用戶
+- **用戶看到的訊息要可讀**：不暴露技術細節（如 stack trace、HTTP code）
+- **與 `swift-safety.mdc` 互補**：禁止 `try!` / `fatalError` 已在 safety 規定，這裡規定錯誤的「處理方式」
+
+## 自定 Error 類型
+
+### 結構
+
+每個模組定義自己的 `Error` enum，採巢狀分類，conform `LocalizedError`：
+
+```swift
+enum AppError: LocalizedError {
+    case network(NetworkError)
+    case wallet(WalletError)
+    case validation(ValidationError)
+
+    var errorDescription: String? {
+        switch self {
+        case .network(let e): return e.errorDescription
+        case .wallet(let e): return e.errorDescription
+        case .validation(let e): return e.errorDescription
+        }
+    }
+}
+
+enum NetworkError: LocalizedError {
+    case offline
+    case timeout
+    case serverError(statusCode: Int)
+    case decodingFailed(underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .offline: return "網路未連線，請檢查連線狀態"
+        case .timeout: return "請求逾時，請稍後再試"
+        case .serverError: return "伺服器暫時無法回應，請稍後再試"
+        case .decodingFailed: return "資料格式錯誤"
+        }
+    }
+}
+```
+
+### 兩種訊息分流
+
+- **`errorDescription`**：給「用戶看」，必須是可理解的中文
+- **`debugDescription`** / log：給「開發者看」，含技術細節
+
+```swift
+extension NetworkError {
+    var debugDescription: String {
+        switch self {
+        case .serverError(let code): return "ServerError(status=\(code))"
+        case .decodingFailed(let e): return "DecodingFailed(underlying=\(e))"
+        default: return errorDescription ?? "unknown"
+        }
+    }
+}
+```
+
+## throws vs Result vs Optional
+
+| 情境 | 用什麼 |
+|---|---|
+| 可能失敗、async 場景 | `async throws` |
+| 同步、需精確分類錯誤、callback chain | `Result<Success, Error>` |
+| 「沒值」是正常情況、不算錯誤 | `Optional` |
+| 多種失敗類型、UI 需顯示不同訊息 | 自定 `enum` + `throws` |
+
+```swift
+// GOOD - async 用 throws
+func fetchBalance() async throws -> Decimal { /* ... */ }
+
+// GOOD - Optional：找不到不算錯誤
+func findUser(id: String) -> User? { /* ... */ }
+
+// GOOD - Result：需要在 callback chain 傳遞
+func validate(_ input: String) -> Result<Validated, ValidationError> { /* ... */ }
+
+// BAD - 用 Bool 表達錯誤
+func saveData(_ data: Data) -> Bool { /* 失敗時調用方無法知道為什麼 */ }
+```
+
+## 禁止吞 error
+
+```swift
+// BAD - catch 後什麼都不做
+do {
+    try await uploadFile()
+} catch {
+    // 空 catch block
+}
+
+// BAD - print 不算處理（production 看不到）
+do {
+    try await uploadFile()
+} catch {
+    print(error)
+}
+
+// GOOD - 至少 log + 適當回應
+do {
+    try await uploadFile()
+} catch {
+    Logger.error("uploadFile failed: \(error)")
+    showAlert(error.localizedDescription)
+    throw error  // 或視情況決定是否往上拋
+}
+```
+
+## 上層處理位置
+
+錯誤處理的「最終消費者」應該明確：
+
+| 層級 | 責任 |
+|---|---|
+| Service / Repository | `throw` 自定 Error，不做 UI |
+| ViewModel | `catch` → 設定 `errorMessage` 狀態，可選擇重試 |
+| View | 從 ViewModel 讀 `errorMessage`，顯示 alert / inline 訊息 |
+| 全域（如 SceneDelegate）| 處理 fallback：未捕獲的錯誤、致命錯誤 log |
+
+```swift
+// ViewModel 範例
+@MainActor
+@Observable
+final class WalletViewModel {
+    var balance: Decimal = 0
+    var errorMessage: String?
+
+    private let service: WalletServicing
+
+    func loadBalance() async {
+        do {
+            balance = try await service.fetchBalance()
+            errorMessage = nil
+        } catch let error as NetworkError {
+            Logger.error("loadBalance: \(error.debugDescription)")
+            errorMessage = error.errorDescription
+        } catch {
+            Logger.error("loadBalance unexpected: \(error)")
+            errorMessage = "發生未預期錯誤，請稍後再試"
+        }
+    }
+}
+```
+
+## 重試與 fallback 策略
+
+- **可重試的錯誤**：網路 timeout、5xx server error → 給用戶「重試」按鈕
+- **不可重試**：4xx client error、validation → 直接顯示原因
+- **致命錯誤**：keychain 損毀、磁碟空間不足 → log + 引導用戶處理
+
+## 範例：完整錯誤流程
+
+```swift
+// 1. Service 拋出明確錯誤
+final class WalletService: WalletServicing {
+    func fetchBalance() async throws -> Decimal {
+        guard NetworkMonitor.isConnected else {
+            throw NetworkError.offline
+        }
+        do {
+            let response = try await api.request(.balance)
+            return try decoder.decode(Balance.self, from: response).amount
+        } catch is DecodingError {
+            throw NetworkError.decodingFailed(underlying: error)
+        } catch {
+            throw error
+        }
+    }
+}
+
+// 2. ViewModel 接住、轉成 UI 狀態
+// (見上方範例)
+
+// 3. View 顯示
+struct WalletView: View {
+    @State var viewModel: WalletViewModel
+    var body: some View {
+        VStack {
+            Text("\(viewModel.balance)")
+            if let msg = viewModel.errorMessage {
+                Text(msg).foregroundColor(.red)
+                Button("重試") {
+                    Task { await viewModel.loadBalance() }
+                }
+            }
+        }
+    }
+}
+```
+
+## 禁止行為
+
+- **禁止** `try!`、`as!`、`fatalError` 處理可恢復錯誤（見 swift-safety.mdc）
+- **禁止**空 catch block
+- **禁止**用 `Bool` / `Int` 回傳錯誤狀態
+- **禁止**直接把 `error.localizedDescription` 顯示給用戶（多半是英文 + 技術細節）→ 用自定 `errorDescription`
+- **禁止**在 production code 用 `print` 當 error log（用 Logger / OSLog）

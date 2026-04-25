@@ -1,0 +1,148 @@
+---
+description: 通用安全規範 — 禁止寫死 secret、私鑰用 Keychain、commit 前掃 secret、跨語言適用
+alwaysApply: true
+---
+
+# 安全規範（跨語言通用）
+
+## 核心原則
+
+**任何敏感資訊都不能進入版控。** 包含：API key、token、密碼、私鑰、助記詞、簽名 secret、客戶資料、內部 endpoint。
+
+## 禁止寫死 secret
+
+```swift
+// BAD
+let apiKey = "sk-1234567890abcdef"
+let dbPassword = "admin123"
+
+// GOOD - 從環境變數或 Keychain 讀
+let apiKey = ProcessInfo.processInfo.environment["API_KEY"]
+    ?? KeychainService.string(for: "api_key")
+    ?? { fatalError("API_KEY not configured") }()
+```
+
+```typescript
+// BAD
+const STRIPE_KEY = "sk_live_xxxxx"
+
+// GOOD
+const STRIPE_KEY = process.env.STRIPE_KEY
+if (!STRIPE_KEY) throw new Error("STRIPE_KEY missing")
+```
+
+```python
+# BAD
+DATABASE_URL = "postgres://user:pass@host/db"
+
+# GOOD
+import os
+DATABASE_URL = os.environ["DATABASE_URL"]
+```
+
+## 環境變數 / 設定檔管理
+
+- **`.env`、`.env.local`、`.env.*` 必須在 `.gitignore`**
+- 提供 **`.env.example`** 範本（只列 key，不填值），讓新成員知道要設哪些
+- **生產環境 secret** 用平台機制：
+  - macOS / iOS：Keychain
+  - 後端：Vault、AWS Secrets Manager、k8s Secret
+  - CI/CD：GitHub Actions Secrets、GitLab CI Variables
+
+## .gitignore 必含項目
+
+```gitignore
+# Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.mobileprovision
+secrets/
+credentials.json
+
+# Build artifacts that may contain secrets
+*.xcconfig.local
+config/local/
+```
+
+## 私鑰 / 敏感資料儲存
+
+| 平台 | 推薦儲存 | 禁止 |
+|---|---|---|
+| iOS / macOS | Keychain（kSecAttrAccessibleWhenUnlockedThisDeviceOnly） | UserDefaults、Plist、檔案 |
+| Web 前端 | HttpOnly Cookie + Secure flag | LocalStorage、SessionStorage |
+| Node.js | 環境變數 + Secret manager | 檔案、log |
+| 行動 App 暫存 | Keychain / EncryptedSharedPreferences | UserDefaults / SharedPreferences |
+
+```swift
+// BAD - 私鑰存 UserDefaults
+UserDefaults.standard.set(privateKey, forKey: "wallet_pk")
+
+// GOOD - 存 Keychain
+KeychainService.set(privateKey, for: "wallet_pk",
+    accessibility: .whenUnlockedThisDeviceOnly)
+```
+
+## Commit 前自我檢查
+
+每次 commit 前用工具掃 secret 關鍵字：
+
+```bash
+# 簡易 grep
+git diff --cached | grep -iE 'api[_-]?key|secret|password|token|private[_-]?key' && echo "⚠️ 疑似 secret"
+
+# 推薦工具（一次性裝）
+brew install gitleaks
+gitleaks detect --staged
+```
+
+## 已洩漏怎麼辦
+
+如果 secret 已 commit：
+
+1. **立即輪換 (rotate)** 該 secret（重新產生 key、改密碼）
+2. **撤銷舊 token** 在對應平台
+3. 用 `git filter-branch` 或 `git filter-repo` 從歷史移除（注意會改寫歷史，需通知共同維護者）
+4. **如果是公開 repo，假設已被爬取**，務必輪換
+
+> 重要：刪掉檔案、改個 commit 是不夠的，git 歷史還在。輪換 secret 才是真解。
+
+## 客戶 / 個人資料
+
+- **PII**（姓名、email、地址、電話）不寫進 log
+- 訊息 / 訂單 / 交易內容不存進 client-side log
+- 上傳給 LLM / 第三方分析前，敏感欄位必須 hash 或 redact
+
+```swift
+// BAD
+Logger.info("User logged in: \(user.email)")
+
+// GOOD
+Logger.info("User logged in: \(user.id)")  // ID 不算 PII（內部識別）
+```
+
+## 第三方相依
+
+- 引入新套件前檢查維護狀態、issue 數、安全公告
+- 鎖定版本號（`package-lock.json`、`Package.resolved`、`requirements.txt` 鎖版本）
+- 定期跑 `npm audit` / `pnpm audit` / `pip-audit` / Xcode Package Dependencies update
+- **絕不複製貼上不明來源的 install 指令**
+
+## API 與網路
+
+- 所有對外 API 用 HTTPS（包含內部 endpoint）
+- iOS：使用 ATS (App Transport Security) 預設，不要為了方便 disable
+- 後端：CORS allowlist 明確、不用 `*`
+- Webhook / API 必須驗證簽名
+
+## 禁止行為
+
+- **禁止**把 secret commit 進 git（即使是 private repo）
+- **禁止**在 commit message、PR description、issue 留言中貼 secret
+- **禁止**在 Slack / Discord / Email 傳遞明文 secret
+- **禁止**截圖 IDE 時露出含 secret 的檔案
+- **禁止**在 production log 印出 token、password、私鑰
+- **禁止**用「先 commit 之後再改」當理由，secret 一旦推上就視為洩漏

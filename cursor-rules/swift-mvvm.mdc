@@ -1,0 +1,226 @@
+---
+description: Swift MVVM 架構規範 — Modern @Observable / Classic ObservableObject、資料流、依賴注入
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# MVVM 架構規範
+
+## 1. 三個角色職責
+
+- **Model**：純資料結構與業務規則，不依賴 UI 層
+- **View**：只負責 UI 呈現與綁定，不寫業務邏輯，不直接呼叫 Service
+- **ViewModel**：管理畫面狀態與行為，連接 View 和 Service / Repository，標 `@MainActor`
+
+## 2. 兩種風格規範
+
+### Modern（iOS 17+）— 預設
+
+deployment target 為 iOS 17+ 一律使用 modern 風格。
+
+```swift
+@MainActor
+@Observable
+final class WalletViewModel {
+    var balance: Decimal = 0
+    var isLoading = false
+
+    private let service: WalletServicing
+
+    init(service: WalletServicing) {
+        self.service = service
+    }
+
+    func loadBalance() async {
+        isLoading = true
+        defer { isLoading = false }
+        balance = (try? await service.fetchBalance()) ?? 0
+    }
+}
+
+struct WalletView: View {
+    @State private var viewModel: WalletViewModel
+
+    var body: some View {
+        Text("\(viewModel.balance)")
+            .task { await viewModel.loadBalance() }
+    }
+}
+```
+
+### Classic（iOS 16-）— 相容舊版
+
+deployment target 必須相容 iOS 16 才使用。
+
+```swift
+@MainActor
+final class WalletViewModel: ObservableObject {
+    @Published var balance: Decimal = 0
+    @Published var isLoading = false
+
+    private let service: WalletServicing
+
+    init(service: WalletServicing) {
+        self.service = service
+    }
+
+    func loadBalance() async {
+        isLoading = true
+        defer { isLoading = false }
+        balance = (try? await service.fetchBalance()) ?? 0
+    }
+}
+
+struct WalletView: View {
+    @StateObject var viewModel: WalletViewModel
+
+    var body: some View {
+        Text("\(viewModel.balance)")
+            .task { await viewModel.loadBalance() }
+    }
+}
+```
+
+## 3. 資料流（單向）
+
+```
+View → ViewModel → Service / Repository → Model
+```
+
+- View 不直接呼叫 Service / Repository
+- View 不直接讀寫 Model（透過 ViewModel 暴露的屬性）
+- ViewModel 不持有 View 的引用
+
+## 4. 依賴注入
+
+- **建構子注入優先**：`init(service: WalletServicing)`，方便測試替換
+- **跨層共享用 `@Environment`**：如 `ThemeManager`、`AppEnvironment`
+- **業務 Service 禁止 `.shared`**：如 `WalletService.shared`、`APIClient.shared`，會破壞測試
+- **全域常駐單例允許 `.shared`**：如 `ThemeManager.shared`、`AppEnvironment.current`，這類沒有業務狀態的全域服務
+
+```swift
+// BAD
+@MainActor
+@Observable
+final class WalletViewModel {
+    func load() async {
+        let data = await WalletService.shared.fetchBalance()
+    }
+}
+
+// GOOD
+@MainActor
+@Observable
+final class WalletViewModel {
+    private let service: WalletServicing
+    init(service: WalletServicing) { self.service = service }
+
+    func load() async {
+        let data = await service.fetchBalance()
+    }
+}
+```
+
+## 5. 命名與檔案結構
+
+- `XxxView.swift` 與 `XxxViewModel.swift` 放在同一個 Feature 資料夾
+- ViewModel 命名為 `XxxViewModel`，不縮寫成 `XxxVM`
+- 子元件放同資料夾的 `Components/` 子目錄
+
+```
+Features/
+└── Wallet/
+    ├── WalletView.swift
+    ├── WalletViewModel.swift
+    └── Components/
+        └── BalanceCard.swift
+```
+
+## 6. ViewModel 規範
+
+- **必須標 `@MainActor`**：所有屬性更新都在主執行緒
+- **副作用走 method**：`loadData()`、`refresh()`、`onTapItem(_:)`
+- **不在 `init` 內做 async 工作**：用 `View.task` 觸發初次載入
+- **`deinit` 取消持有的 `Task`**：避免 ViewModel 釋放後背景任務還在跑
+- **不持有 View 引用**：透過狀態屬性間接驅動 View 重繪
+
+```swift
+// BAD
+@MainActor
+@Observable
+final class WalletViewModel {
+    init(service: WalletServicing) {
+        self.service = service
+        Task { await loadBalance() }  // init 內做 async
+    }
+}
+
+// GOOD
+@MainActor
+@Observable
+final class WalletViewModel {
+    init(service: WalletServicing) {
+        self.service = service
+    }
+    func loadBalance() async { /* ... */ }
+}
+
+struct WalletView: View {
+    @State private var viewModel: WalletViewModel
+    var body: some View {
+        content.task { await viewModel.loadBalance() }
+    }
+}
+```
+
+## 7. View 規範
+
+- **不寫 `async/await`、`try?`、`guard let` 等資料處理邏輯**
+- **不寫業務邏輯**：驗證、計算、轉換都在 ViewModel
+- **`.task` / `.onAppear` 呼叫 ViewModel method**
+
+### 何時開 ViewModel
+
+**預設用 `@State`**，符合下列**任一條**才開 ViewModel：
+
+1. 有 `async/await` 呼叫（網路、資料庫、鏈上資料）
+2. 有業務邏輯（驗證、計算、資料轉換）
+3. 依賴外部 Service / Repository
+4. 有多步驟狀態機（loading / success / error 不算多步驟）
+5. 該邏輯需要單元測試
+6. 狀態需在 3 層以上子 View 共享
+
+全部不符合就只用 `@State`，**不要為了「架構統一」開空殼 ViewModel**。
+
+```swift
+// GOOD - 純 UI 折疊狀態，無業務邏輯，用 @State 即可
+struct ExpandableSection: View {
+    @State private var isExpanded = false
+    let title: String
+    let content: String
+
+    var body: some View {
+        VStack {
+            Button(title) { isExpanded.toggle() }
+            if isExpanded { Text(content) }
+        }
+    }
+}
+
+// GOOD - 有 async 載入 + 業務邏輯，必須開 ViewModel
+struct WalletView: View {
+    @State private var viewModel: WalletViewModel
+    var body: some View {
+        Text("\(viewModel.balance)")
+            .task { await viewModel.loadBalance() }
+    }
+}
+
+// BAD - 簡單 UI 卻硬開空殼 ViewModel
+@MainActor
+@Observable
+final class ExpandableSectionViewModel {
+    var isExpanded = false  // 沒業務邏輯、沒 async、沒 Service
+    func toggle() { isExpanded.toggle() }
+}
+```

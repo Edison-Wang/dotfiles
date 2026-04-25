@@ -1,0 +1,11 @@
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.env
+.env.local

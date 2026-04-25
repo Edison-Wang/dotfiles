@@ -1,0 +1,41 @@
+---
+description: Swift 安全性與非同步規範 — 禁止強制解包、線程安全、async 資料更新
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# 安全性與非同步
+
+## 禁止強制解包 / 強制轉型
+
+- **禁止 `try!`**：使用 `do/catch` 或 `try?` + `guard let`
+- **禁止 `as!`**：使用 `as?` + `guard let` / `if let`
+- **禁止 `!` 強制解包**（如 `url!`、`dict["key"]!`）：使用 optional binding
+- **禁止 `fatalError()` 作為邏輯分支**：改為回傳 Optional 或 throw Error
+- **唯一例外**：硬編碼常數 URL（如 `URL(string: "https://...")!`）且已標註 `swiftlint:disable`
+
+```swift
+// BAD
+let data = json.data(using: .utf8)!
+let chain = someOptional!.evmKitChain
+let kit = try! SomeKit.instance()
+
+// GOOD
+guard let data = json.data(using: .utf8) else { throw SomeError.encodingFailed }
+guard let chain = someOptional?.evmKitChain else { return }
+let kit = try SomeKit.instance()  // let caller handle error
+```
+
+## 線程安全
+
+- 使用 `NSLock` 保護共享可變狀態（非 actor 類別）
+- UI 更新必須在 `@MainActor` 或 `DispatchQueue.main` 上執行
+- `Task` 內要檢查 `Task.isCancelled`，避免不必要的工作
+- 在 `deinit` 中取消持有的 `Task`
+- Combine 訂閱使用 `[weak self]` 避免循環引用
+
+## 非同步資料更新
+
+- 網路/鏈上資料取得必須為 `async`，不得阻塞主線程
+- 列表順序應固定（由 `sortOrder` 或固定排序決定），僅更新數值欄位
+- 避免重複觸發整個列表重新排序

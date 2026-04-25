@@ -1,0 +1,24 @@
+---
+description: Swift 專案結構與導覽慣例 — Feature 資料夾、Sheet、環境 Scheme
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# 專案結構與導覽
+
+## 資料夾慣例
+
+- 相關功能的 View + 相關元件放同一個 Feature 資料夾（ViewModel 與 MVVM 細節見 `swift-mvvm.mdc`）
+- 可復用 UI 元件放 `Core/Components/`
+- 擴展放 `Core/Extensions/`
+- 依功能領域分資料夾，避免單層放太多檔案
+
+## Sheet / 導覽慣例
+
+- 全螢幕或半頁 Sheet 統一使用共用的 Sheet 元件（自帶關閉按鈕）
+- 避免在 Sheet 內巢狀 `NavigationStack` 造成返回衝突
+
+## 環境與 Scheme
+
+- 開發與正式環境各建獨立 Scheme，搭配編譯條件區分（如 `DEV_ENV`）
+- 使用統一的環境判斷入口（如 `AppEnvironment.current`），不硬編碼環境值

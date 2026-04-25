@@ -1,0 +1,51 @@
+---
+description: Swift Theme 系統 — AppColors / AppFonts 使用規範，禁止硬編碼顏色與字體
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# Theme 系統（顏色 / 字體）
+
+所有 UI 的顏色與字體必須從 Theme 系統取用，禁止硬編碼。
+
+## 顏色 — `AppColors`
+
+- 存取：`AppColors.background`、`AppColors.textPrimary` 等
+- `AppColors` 是靜態代理，內部轉發到 `ThemeManager.shared.colors`，支援 dark / light / system 切換
+- 新增顏色時，必須同時在 `ThemeColors.dark` 和 `ThemeColors.light` 各加一筆
+- 品牌色或固定色可設為不隨主題切換的常數
+- 定義位置：`Core/Theme/AppColors.swift`、`Core/Theme/ThemeManager.swift`
+
+```swift
+// BAD
+Text("Hello").foregroundColor(Color(hex: "F0B90B"))
+view.background(Color.black)
+
+// GOOD
+Text("Hello").foregroundColor(AppColors.primary)
+view.background(AppColors.background)
+```
+
+## 字體 — `AppFonts`
+
+- 存取：`AppFonts.title1`、`AppFonts.bodyMedium`、`AppFonts.numericLarge` 等
+- 標題：`largeTitle`(34)、`title1`(28)、`title2`(22)、`title3`(20)
+- 內文：`bodyLarge`(17)、`bodyMedium`(15)、`bodySmall`(13)，各有 Semibold 變體
+- 標註：`caption`(12)、`captionSemibold`(12)、`micro`(10)
+- 數值（monospaced）：`numericLarge`(34)、`numericMedium`(22)、`numericSmall`(15)、`numericCaption`(12)
+- 定義位置：`Core/Theme/AppFonts.swift`
+
+```swift
+// BAD
+Text("$1,234").font(.system(size: 22, weight: .semibold))
+
+// GOOD
+Text("$1,234").font(AppFonts.numericMedium)
+```
+
+## 新增 Theme 屬性流程
+
+1. 在 `ThemeColors` struct 新增屬性
+2. 在 `ThemeColors.dark` 和 `ThemeColors.light` 各設定值
+3. 在 `AppColors` enum 新增對應的 static var 代理
+4. 字體則直接在 `AppFonts` enum 新增 static let

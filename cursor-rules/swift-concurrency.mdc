@@ -1,0 +1,194 @@
+---
+description: Swift 進階併發規範 — actor / Sendable / Task / AsyncSequence / Combine 選用
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# 進階併發規範
+
+> 基礎併發（async 不阻塞主線程、Task 取消、@MainActor UI 更新）見 `swift-safety.mdc`，本規則處理進階主題。
+
+## actor 何時用
+
+**用 actor**：共享可變狀態、需要序列化存取、不需要 UI 直接綁定。
+
+```swift
+actor Cache<Key: Hashable, Value> {
+    private var storage: [Key: Value] = [:]
+
+    func get(_ key: Key) -> Value? { storage[key] }
+    func set(_ key: Key, _ value: Value) { storage[key] = value }
+}
+
+// 使用必須 await
+let cache = Cache<String, Data>()
+let data = await cache.get("key")
+```
+
+**用 class + NSLock**：必須與 Objective-C 互通、需要 reference semantics 又不想 await。
+
+**用 @MainActor class**：UI 相關狀態、ViewModel（呼應 `swift-mvvm.mdc`）。
+
+**用 struct + actor 包裝**：值語意 + 安全併發（推薦現代 Swift 做法）。
+
+## Sendable
+
+跨 actor 或 Task 邊界傳遞的型別必須 Sendable：
+
+```swift
+struct UserProfile: Sendable {
+    let id: String
+    let name: String
+}
+
+final class ImageLoader: Sendable {
+    private let cache: Cache<URL, Data>
+    init(cache: Cache<URL, Data>) { self.cache = cache }
+}
+
+@MainActor
+final class WalletViewModel {
+}
+```
+
+- **struct 含全 Sendable 屬性** → 自動 Sendable
+- **class** → 預設不 Sendable，需顯式宣告 + 內部用 actor / lock 保護可變狀態
+- **@MainActor 標註的型別** → 隱含 Sendable（透過 isolation 保護）
+- **closure 跨 Task 傳** → 需 `@Sendable () -> Void`
+
+## Task vs DispatchQueue
+
+**新代碼一律 Task / async**，不再用 `DispatchQueue.global().async`。
+
+| 場景 | 用什麼 |
+|---|---|
+| async function 內 | `Task { ... }` |
+| UI 觸發背景工作 | `Task.detached { ... }`（脫離 actor context） |
+| 需要 `@Published` / Observable 更新 | 在 `@MainActor` Task 內 |
+| 主線程 work（罕見必要時） | `await MainActor.run { ... }` |
+| 既有 GCD 代碼維護 | 保持 GCD，不混用 |
+
+```swift
+Task {
+    let data = try await fetchData()
+    self.items = data
+}
+
+let path = await Task.detached(priority: .userInitiated) {
+    return await DiskCache.computeExpensiveHash()
+}.value
+```
+
+## Task 取消
+
+長任務必須支援取消：
+
+```swift
+func loadAllImages(urls: [URL]) async throws -> [UIImage] {
+    var images: [UIImage] = []
+    for url in urls {
+        try Task.checkCancellation()
+        let image = try await loadImage(url)
+        images.append(image)
+    }
+    return images
+}
+
+class ViewController {
+    private var loadingTask: Task<Void, Never>?
+
+    func startLoading() {
+        loadingTask = Task {
+            for try await chunk in stream {
+                if Task.isCancelled { break }
+                process(chunk)
+            }
+        }
+    }
+
+    deinit {
+        loadingTask?.cancel()
+    }
+}
+```
+
+## TaskGroup（並行多個任務）
+
+```swift
+func loadProfiles(ids: [String]) async throws -> [Profile] {
+    try await withThrowingTaskGroup(of: Profile.self) { group in
+        for id in ids {
+            group.addTask {
+                try await fetchProfile(id: id)
+            }
+        }
+
+        var profiles: [Profile] = []
+        for try await profile in group {
+            profiles.append(profile)
+        }
+        return profiles
+    }
+}
+```
+
+**用 TaskGroup**：N 個獨立任務並行、需要動態加入。
+**用 `async let`**：固定 2-3 個並行任務。
+
+```swift
+async let profile = fetchProfile()
+async let balance = fetchBalance()
+let (p, b) = try await (profile, balance)
+```
+
+## AsyncSequence / AsyncStream
+
+**消費 AsyncSequence**：
+
+```swift
+for try await event in eventStream {
+    handle(event)
+}
+```
+
+**製造 AsyncStream**（包裝 callback / Notification）：
+
+```swift
+func notificationStream(_ name: Notification.Name) -> AsyncStream<Notification> {
+    AsyncStream { continuation in
+        let token = NotificationCenter.default.addObserver(
+            forName: name, object: nil, queue: .main
+        ) { notification in
+            continuation.yield(notification)
+        }
+        continuation.onTermination = { _ in
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+}
+```
+
+## async/await vs Combine 選用
+
+| 場景 | 選 |
+|---|---|
+| 一次性 async 呼叫（API、磁碟讀寫）| async/await |
+| 連續事件流（NotificationCenter、KVO、計時器）| AsyncStream 或 Combine |
+| 既有大量 Combine 代碼 | 保持 Combine |
+| SwiftUI 新代碼 | async/await + `@Observable` |
+| 反應式 UI 數據綁定 | Combine 或 `@Observable` 二擇一，不混用 |
+
+新代碼**優先 async/await**，Combine 維護模式。
+
+## 禁止行為
+
+- **禁止**在 actor 方法內呼叫 `Thread.sleep`（會卡住整個 actor）
+- **禁止**用 `DispatchSemaphore` 同步等待 async function（會 deadlock）
+- **禁止**在 async function 內無腦 `Task { ... }` 包一層（直接 await 即可）
+- **禁止**忽略 `@discardableResult` 而呼叫 throws function 不處理錯誤
+- **禁止**跨 actor 傳遞非 Sendable closure（編譯器會擋，不要用 `@unchecked` 繞過）
+- **禁止**用 `Task.detached` 當逃避 actor 隔離的工具（多半是設計問題）
+
+## Strict Concurrency Checking
+
+新專案在 Build Settings 開 **Strict Concurrency Checking = Complete**（Swift 6 起預設）。讓編譯器檢查所有 Sendable 違規，避免跑時崩潰。

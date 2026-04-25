@@ -1,0 +1,199 @@
+---
+description: Swift 無障礙規範 — VoiceOver / Dynamic Type / 對比 / 觸控目標 / Reduce Motion
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# 無障礙規範
+
+> 上架公眾 App、面向廣泛用戶（含長者、視障、色弱）必加。內部工具或 dev tool 可放低標準但建議盡量遵循。
+
+## VoiceOver
+
+### 必標 accessibilityLabel
+
+任何用戶可互動的元件、純圖示按鈕、自定 view 都要有 label。
+
+```swift
+// BAD - VoiceOver 唸出 "button"，不知道按下會發生什麼
+Button(action: { delete() }) {
+    Image(systemName: "trash")
+}
+
+// GOOD
+Button(action: { delete() }) {
+    Image(systemName: "trash")
+}
+.accessibilityLabel("刪除")
+.accessibilityHint("永久移除此項目")
+```
+
+- **`accessibilityLabel`**：元件是什麼（短）
+- **`accessibilityHint`**：按下會發生什麼（補充）
+- **`accessibilityValue`**：當前值（如滑桿位置 "音量 50%"）
+
+### 結合與隱藏
+
+```swift
+HStack {
+    Image(systemName: "star.fill")
+    Text("4.5")
+    Text("（132 則評論）")
+}
+.accessibilityElement(children: .combine)
+.accessibilityLabel("評分 4.5 顆星，共 132 則評論")
+
+Image("decorative-bg")
+    .accessibilityHidden(true)
+```
+
+### 自定觸控元件
+
+```swift
+RoundedRectangle(cornerRadius: 8)
+    .fill(Color.blue)
+    .frame(width: 200, height: 50)
+    .onTapGesture { confirm() }
+    .accessibilityElement()
+    .accessibilityLabel("確認")
+    .accessibilityAddTraits(.isButton)
+```
+
+## Dynamic Type（字體縮放）
+
+### 用內建 text style，不寫死字體大小
+
+```swift
+// BAD - 用戶調大系統字體無效
+Text("標題").font(.system(size: 17))
+Text("內文").font(.system(size: 15))
+
+// GOOD - 跟隨系統設定縮放
+Text("標題").font(.headline)
+Text("內文").font(.body)
+Text("標註").font(.caption)
+```
+
+> 與 `swift-theme.mdc` 的 `AppFonts` 整合：自定字體 token 應使用 `Font.system(_:weight:)` 並指定 text style（`.body`、`.title2`），而非寫死 pt 數。
+
+### 限制最大縮放（極端情境）
+
+```swift
+Text("標題")
+    .font(.title)
+    .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+```
+
+只在 layout 真的會壞時才限制，預設讓用戶完全自由。
+
+### 測試
+
+模擬器：Settings → Accessibility → Display & Text Size → Larger Text 拉到最大，檢查所有頁面 layout 不破。
+
+## 顏色對比 (WCAG AA)
+
+- 一般文字對背景：**4.5:1** 以上
+- 大字（≥18pt 或 ≥14pt bold）：**3:1** 以上
+- 互動元件（按鈕、icon）：**3:1** 以上
+
+```swift
+// BAD - 灰色文字在白底，對比 3.0
+Text("提示").foregroundColor(.gray)
+
+// GOOD - 用 secondary，自動依背景調整
+Text("提示").foregroundColor(.secondary)
+```
+
+工具：[WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/) 或 Xcode 內建 Accessibility Inspector → Color Contrast Audit。
+
+**不能僅用顏色傳達意義**（色盲考量）：
+
+```swift
+HStack {
+    Circle().fill(.red).frame(width: 8, height: 8)
+    Text("錯誤")
+    Image(systemName: "xmark.circle.fill")
+}
+```
+
+## 觸控目標 (Hit Target)
+
+最小 **44 × 44 pt**（Apple HIG）。
+
+```swift
+Button(action: {}) {
+    Image(systemName: "xmark")
+}
+.frame(minWidth: 44, minHeight: 44)
+.contentShape(Rectangle())
+```
+
+**列表 row** 至少 44pt 高，**icon-only 按鈕**用 `.padding()` 撐到 44。
+
+## Reduce Motion
+
+用戶開「減少動態效果」時，停用大幅度動畫：
+
+```swift
+@Environment(\.accessibilityReduceMotion) var reduceMotion
+
+withAnimation(reduceMotion ? nil : .spring()) {
+    isExpanded.toggle()
+}
+
+if !reduceMotion {
+    HeroAnimation()
+}
+```
+
+## 其他環境變數
+
+```swift
+@Environment(\.accessibilityReduceTransparency) var reduceTransparency
+@Environment(\.accessibilityDifferentiateWithoutColor) var differentiateWithoutColor
+@Environment(\.accessibilityInvertColors) var invertColors
+@Environment(\.colorSchemeContrast) var contrast
+```
+
+依用戶偏好調整 UI 行為。
+
+## 自動化檢查
+
+### Xcode Accessibility Inspector
+
+`Xcode → Open Developer Tool → Accessibility Inspector`
+
+- Audit：自動掃描 missing label、low contrast、small target
+- 跑模擬器時即時檢查
+
+### XCTest Accessibility Audit (iOS 17+)
+
+```swift
+func test_walletScreen_accessibilityAudit() throws {
+    let app = XCUIApplication()
+    app.launch()
+    try app.performAccessibilityAudit()
+}
+```
+
+CI 加這條測試，違規會 fail。
+
+## 禁止行為
+
+- **禁止**純圖示按鈕沒有 `accessibilityLabel`
+- **禁止**字體大小寫死 pt 數（除特殊 monospaced 數字情境）
+- **禁止**僅用顏色傳達狀態（紅色 = 錯誤，必須加 icon 或文字）
+- **禁止**觸控目標小於 44×44pt
+- **禁止**強制動畫不檢查 `reduceMotion`
+- **禁止**用「等之後再補」當理由跳過無障礙
+
+## MVP 階段最低標
+
+如果時間有限，至少做到：
+
+1. 所有按鈕有 `accessibilityLabel`
+2. 字體用 text style（`.body`、`.title` 等）
+3. 對比過 WCAG AA
+4. 觸控目標 ≥ 44pt
+
+剩下的（Reduce Motion、Differentiate Without Color 等）可以分階段補。

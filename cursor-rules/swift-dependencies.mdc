@@ -1,0 +1,153 @@
+---
+description: Swift 依賴管理規範 — SPM 為主、套件評估、版本鎖定、引入決策
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# 依賴管理規範
+
+## 套件管理工具選用
+
+- **首選 Swift Package Manager (SPM)**：Apple 官方、Xcode 原生整合、無需第三方工具
+- **CocoaPods 維護模式**：既有專案不主動遷移，但新依賴優先 SPM 版本
+- **Carthage**：避免使用（生態萎縮）
+- **手動拖入 framework**：僅限 SPM/CocoaPods 都不支援的閉源套件
+
+## 引入新依賴前的評估
+
+引入任何第三方套件前，**必須**評估以下：
+
+### 1. 必要性（最重要）
+
+問自己三個問題：
+
+1. **這功能能用 30 行內自己寫嗎？** → 自己寫
+2. **Apple SDK 已有類似功能嗎？**（如 URLSession 取代 Alamofire）→ 用 Apple
+3. **三個月後還會用到嗎？** → 否則就別引入
+
+```swift
+// BAD - 為了一個 HTTP 請求引入 Alamofire 整包
+import Alamofire
+AF.request(url).responseDecodable(of: User.self) { ... }
+
+// GOOD - URLSession 內建已足夠
+let (data, _) = try await URLSession.shared.data(from: url)
+let user = try JSONDecoder().decode(User.self, from: data)
+```
+
+### 2. 維護狀態
+
+- **GitHub last commit 在 6 個月內**
+- **Open issue / PR 沒堆積**（< 50 是好兆頭）
+- **有 release tag、Semantic Versioning**
+- **README 清楚、有完整範例**
+
+### 3. 安全性
+
+- 檢查是否有 [GitHub Security Advisory](https://github.com/advisories)
+- 看 Issues 有無「security」、「vulnerability」標籤
+- **避免**作者只有 1-2 人 + 沒組織背書的關鍵基礎建設套件
+
+### 4. License
+
+| License | 商業專案 |
+|---|---|
+| MIT / Apache 2.0 / BSD | OK |
+| LGPL | 動態連結 OK，但需揭露版本 |
+| GPL / AGPL | **禁用**（會感染整個 App） |
+| 自定 / 不明 | **禁用**（除非律師確認） |
+
+### 5. 大小與啟動時間影響
+
+- 一個 Pod 增加 5MB+ 二進位 → 慎重
+- 很多 dependencies 增加冷啟動時間
+
+## 版本鎖定
+
+### Package.resolved 必須 commit
+
+`Package.resolved` 記錄精確版本，**必須**進 git，確保所有人 / CI 用同一版。
+
+```bash
+# .gitignore 不要 ignore 這個
+# Package.resolved  ← 不要加
+```
+
+### 在 Package.swift 用範圍
+
+```swift
+.package(
+    url: "https://github.com/apple/swift-collections.git",
+    .upToNextMajor(from: "1.0.0")
+)
+
+.package(
+    url: "https://github.com/some/critical-lib.git",
+    exact: "2.3.4"
+)
+
+.package(
+    url: "https://github.com/foo/bar.git",
+    branch: "main"
+)
+```
+
+## 升級策略
+
+- **每月一次** 跑 `File → Packages → Update to Latest Package Versions`
+- **major version 升級**單獨開 branch / PR，跑完 regression test
+- **patch / minor** 升級可批次
+- 升級後跑全測試 + 手動測關鍵流程
+
+## 第三方 vs Apple SDK
+
+優先 Apple SDK：
+
+| 功能 | Apple | 不要用 |
+|---|---|---|
+| HTTP | URLSession | Alamofire（除非極特殊需求） |
+| JSON | Codable | SwiftyJSON |
+| 圖片快取 | NSCache + Data | Kingfisher（除非要 Combine + 大量功能） |
+| Reactive | Combine / Observation | RxSwift（新代碼） |
+| 動畫 | SwiftUI Animation | Lottie（除非要 After Effects 動畫） |
+| 持久化 | SwiftData / Core Data | Realm（除非跨平台需求） |
+| 加密 | CryptoKit | CommonCrypto wrapper |
+
+例外：Apple SDK 真的不夠用、自己寫工程量過大時才引入第三方。
+
+## 常見可接受的第三方
+
+| 套件 | 用途 | 為何可接受 |
+|---|---|---|
+| `pointfreeco/swift-snapshot-testing` | UI 視覺回歸 | Apple 沒提供 |
+| `apple/swift-collections` | OrderedSet、Deque | Apple 官方 |
+| `apple/swift-async-algorithms` | AsyncSequence 工具 | Apple 官方 |
+| `realm/SwiftLint` | Lint | 業界標準 |
+| `Alamofire/Alamofire` | HTTP（複雜情境）| 維護穩定，需大量 retry / interceptor 才考慮 |
+
+## 私有 / Fork 套件
+
+- **避免** fork 別人的套件改完就用，未來合併原作者更新很痛
+- 必要時 fork → 開 PR 給原作者 → 等合併
+- 真的非 fork 不可：在 README 標註 fork 自誰、改了什麼、為何不送 upstream
+
+## 禁止行為
+
+- **禁止**為了「少寫 5 行」引入大套件
+- **禁止**引入超過 6 個月沒更新的套件
+- **禁止**引入 GPL / AGPL 套件到商業 App
+- **禁止**用 `branch: "main"` 在 production code（隨時會壞）
+- **禁止**忽略安全公告 keep using vulnerable version
+- **禁止** `Package.resolved` 加進 `.gitignore`
+- **禁止**在不同人本機跑出不同的依賴版本
+
+## 移除依賴
+
+定期 review 哪些套件已不再使用，移除可：
+- 減少二進位大小
+- 減少 build 時間
+- 減少潛在安全風險
+
+```bash
+xcodebuild -showBuildSettings | grep "OTHER_LDFLAGS"
+```

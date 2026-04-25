@@ -1,0 +1,253 @@
+---
+description: 註解規範 — 寫 why 不寫 what、禁止廢話註解、文檔註解格式、TODO 規範
+alwaysApply: true
+---
+
+# 註解規範（跨語言通用）
+
+## 核心原則
+
+**註解只解釋「為什麼這樣寫」，不解釋「這段在做什麼」。**
+
+代碼本身就應該說明「做什麼」（透過清晰的命名與結構）。註解的存在是為了補充代碼無法表達的：意圖、決策、限制、坑。
+
+## 禁止：廢話註解
+
+```swift
+// BAD - 註解只是把代碼翻成中文，毫無資訊量
+// 增加 counter
+counter += 1
+
+// 取得用戶名稱
+let name = user.name
+
+// 如果年齡大於 18 就回傳 true
+if age > 18 { return true }
+
+// 設定背景色為藍色
+view.backgroundColor = .blue
+
+// for 迴圈遍歷 items
+for item in items { /* ... */ }
+```
+
+```typescript
+// BAD - 同樣是廢話
+// Import the module
+import { Foo } from './foo'
+
+// Define the function
+function add(a: number, b: number) {
+    // Return the sum
+    return a + b
+}
+```
+
+## 應該：解釋意圖、決策、限制
+
+```swift
+// GOOD - 解釋為何選這個閾值
+guard amount <= 10_000 else {
+    // 業務規定：單筆超過 1 萬需走人工審核流程
+    throw TransferError.requiresApproval
+}
+
+// GOOD - 解釋 workaround 與原因
+// iOS 17.4 SDK bug: TextField focus 在 Sheet 內首次顯示會失效
+// Apple 已 confirmed (FB13456789)，下版修復前用 0.1s delay workaround
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    isFocused = true
+}
+
+// GOOD - 解釋為何不用看似更好的做法
+// 不用 NSCache 是因為需要持久化跨 app launch
+// 也不用 SwiftData 是因為這層是純 hot cache，不需 query
+private let cache = OrderedDictionary<URL, Data>()
+
+// GOOD - 解釋邊界情境
+// 中文姓名最多 8 字（含複姓 + 名），英文名最多 50 字
+let maxLength = isChineseLocale ? 8 : 50
+```
+
+## 應該：解釋複雜邏輯
+
+```swift
+// GOOD - 演算法非顯而易見時，解釋思路
+// Boyer-Moore 多數投票演算法：
+// 1. 候選人 + 計數，相同 +1，不同 -1
+// 2. 計數歸零換新候選人
+// 3. 最後的候選人就是多數元素
+func majorityElement(_ nums: [Int]) -> Int {
+    var candidate = 0, count = 0
+    for n in nums {
+        if count == 0 { candidate = n }
+        count += (n == candidate) ? 1 : -1
+    }
+    return candidate
+}
+```
+
+## 文檔註解（公開 API）
+
+公開 API（class、struct、protocol、function、property）用語言慣用的文檔註解。
+
+### Swift（`///`）
+
+```swift
+/// 將指定金額從來源錢包轉至目標地址。
+///
+/// - Parameters:
+///   - amount: 轉帳金額，單位為對應幣種最小單位（如 wei）
+///   - to: 目標地址，必須為合法 EVM 地址（0x 開頭 + 40 hex chars）
+/// - Returns: 交易 hash（成功）
+/// - Throws:
+///   - `WalletError.insufficientBalance` 餘額不足
+///   - `WalletError.invalidAddress` 地址格式錯誤
+///   - `NetworkError.timeout` 網路逾時（可重試）
+///
+/// - Note: 此方法不檢查 gas 估算，請呼叫前先 estimate
+/// - Important: 必須在用戶確認簽名後呼叫
+func transfer(amount: BigUInt, to address: String) async throws -> String
+```
+
+### TypeScript（JSDoc）
+
+```typescript
+/**
+ * Transfers tokens from source wallet to destination address.
+ *
+ * @param amount - Amount in smallest unit (e.g. wei)
+ * @param to - Destination EVM address (0x + 40 hex chars)
+ * @returns Transaction hash on success
+ * @throws {InsufficientBalanceError} when balance is too low
+ * @throws {InvalidAddressError} when address format is invalid
+ *
+ * @remarks Does not estimate gas; call estimate first
+ * @example
+ *   const hash = await wallet.transfer(1000n, "0xabc...")
+ */
+async function transfer(amount: bigint, to: string): Promise<string>
+```
+
+### Python（docstring）
+
+```python
+def transfer(amount: int, to: str) -> str:
+    """Transfer tokens from source wallet to destination address.
+
+    Args:
+        amount: Amount in smallest unit (e.g. wei).
+        to: Destination EVM address (0x + 40 hex chars).
+
+    Returns:
+        Transaction hash on success.
+
+    Raises:
+        InsufficientBalanceError: When balance is too low.
+        InvalidAddressError: When address format is invalid.
+    """
+```
+
+## TODO / FIXME / NOTE
+
+### 統一前綴 + 範圍 + 上下文
+
+```swift
+// TODO(@username): 改用 actor 重寫，移除手動 lock — issue #234
+// FIXME: 此處遇 emoji 名稱會 crash，需補 grapheme cluster 處理
+// NOTE: 故意保留同步呼叫，因 caller 在 init 階段，無法 async
+// HACK: 暫時繞過 Apple bug，等 iOS 17.5 修復後可移除（FB13456789）
+```
+
+| 前綴 | 用途 |
+|---|---|
+| `TODO` | 已知該做但尚未做的事（最好附 issue 連結） |
+| `FIXME` | 已知 bug、不影響當前功能但要修 |
+| `NOTE` | 重要說明、避免他人誤改 |
+| `HACK` | 臨時繞過、有更好做法但暫時用此 |
+| `XXX` / `WTF` | **禁止**（無資訊量、不專業） |
+
+### TODO 應有可追蹤資訊
+
+```swift
+// BAD - 永遠不會被處理
+// TODO: 改進這裡
+
+// GOOD - 知道誰負責、什麼時候做
+// TODO(@john, 2026-Q2): 重構為 use case pattern — see #234
+```
+
+## 註解過時 → 寧可刪掉
+
+代碼改了，註解沒跟著改，比沒註解更糟。
+
+```swift
+// BAD - 註解寫上限 10000，但代碼已改成 50000
+// 上限 10000，超過要審核
+guard amount <= 50_000 else { throw .requiresApproval }
+```
+
+養成習慣：改代碼時順手 review 上下方註解是否還對。
+
+## Region / MARK
+
+### Swift `// MARK:`
+
+```swift
+final class WalletViewModel {
+    // MARK: - Public Properties
+    var balance: Decimal = 0
+
+    // MARK: - Private Properties
+    private let service: WalletServicing
+
+    // MARK: - Lifecycle
+    init(service: WalletServicing) { ... }
+
+    // MARK: - Public Methods
+    func loadBalance() async { ... }
+
+    // MARK: - Private Helpers
+    private func validate(_ amount: Decimal) -> Bool { ... }
+}
+```
+
+加 `-` 在 jump bar 顯示分隔線。每個 MARK 約 5-15 個方法，太多代表類別該拆。
+
+### 不要過度用 MARK
+
+10 行的小檔案不需要 MARK，反而干擾閱讀。
+
+## 註解與代碼一致性
+
+- 縮排與代碼對齊
+- 不在行尾寫超過 80 字的註解（換行）
+- 多行註解用區塊 `/* */` 或重複 `//`，依語言慣例
+
+## 商標 / 版權 header
+
+公司專案加 file header（用 Xcode template 或 SwiftLint header rule）：
+
+```swift
+//
+//  WalletViewModel.swift
+//  ProjectName
+//
+//  Created by Edison on 2026/04/25.
+//  Copyright © 2026 CompanyName. All rights reserved.
+//
+```
+
+開源 / 個人專案可省略，依需求加 SPDX license identifier：
+
+```swift
+// SPDX-License-Identifier: MIT
+```
+
+## 禁止行為
+
+- **禁止**為了「達到註解覆蓋率」寫廢話註解
+- **禁止**用 `// XXX` / `// WTF` / `// 我也不知道為什麼這樣寫`
+- **禁止**留 `// commented out` 死代碼超過 1 commit（用 git history 看舊代碼，不要塞註解）
+- **禁止**註解寫錯誤的英文 / 中文混寫得難以閱讀（同檔案內保持語言一致）
+- **禁止**過時註解放任不管

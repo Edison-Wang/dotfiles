@@ -11,10 +11,20 @@ alwaysApply: true
 
 ## 標準流程
 
-1. **完成實作**：寫完代碼、修完 lint、自我檢查無誤
-2. **通知用戶測試**：明確告知改動了哪些檔案、預期的測試重點
-3. **等待用戶確認**：用戶必須回覆「OK / 通過 / 可以 commit」之類的明確指示
-4. **才 commit**：使用清晰的 commit message（中文或英文皆可）
+1. **完成實作**：寫完代碼、修完 lint
+2. **執行 Build 驗證**（**lint ≠ build**，必做）：
+   - 必須通過 Compiler 階段（無 type / protocol / import / syntax 錯誤）
+   - **工具環境問題**（SPM 套件解析失敗、DerivedData 損壞、submodule clone 失敗等）擋住完整 build 時，最低底線：
+     a. 改過的檔案 lint 通過
+     b. Build error log 中**無一條指向自己改過的檔案**
+     c. 必須誠實說明「環境問題擋住完整 build，但錯誤不在我的改動」
+   - **絕對禁止**將「lint 通過」自我合理化為「build 應該沒問題」
+3. **通知用戶測試**：明確告知
+   - 改動了哪些檔案
+   - **Build 狀態**（成功 / 失敗 / 環境擋住）
+   - 預期的測試重點
+4. **等待用戶確認**：用戶必須回覆「OK / 通過 / 可以 commit」之類的明確指示
+5. **才 commit**：使用清晰的 commit message（中文或英文皆可）
 
 ## 禁止行為
 
@@ -22,6 +32,8 @@ alwaysApply: true
 - **禁止**用戶只說「看一下」「檢查一下」就視為同意 commit
 - **禁止**自行批量 commit 多個未測試的修改
 - **禁止**為了「保險起見」或「避免遺失」就 commit
+- **禁止**沒跑 build 就告訴用戶「可以測試」
+- **禁止**把 lint 通過當成 build 通過
 
 ## 例外情況
 
@@ -39,11 +51,35 @@ alwaysApply: true
 
 ## 範例對話流程
 
+### 正確流程（build 成功）
+
 ```
 AI: 已完成 XXX 功能的實作，修改了 A.swift、B.swift。
+    Build：✅ 通過。
     請測試以下情境：1. ... 2. ...，確認沒問題我再 commit。
 
 User: OK 沒問題
 
 AI: 好的，現在進行 commit。
+```
+
+### 正確流程（build 環境問題）
+
+```
+AI: 已完成 XXX 功能，修改了 A.swift。
+    Build：⚠️ SPM 套件解析失敗（環境問題，先前也遇過），
+    但 error log 中無一條指向 A.swift；lint 也乾淨。
+    建議你在 Xcode GUI 試 build，請測試 ...
+
+User: 可以跑
+
+AI: 好的，現在進行 commit。
+```
+
+### 反面教材（不可發生）
+
+```
+AI: 已完成 XXX 功能，lint 通過，請測試。   ❌ 沒跑 build
+User: Build failed: Type 'XXX' does not conform to protocol
+AI: 抱歉，少 import Combine。                ← 這就是失職
 ```

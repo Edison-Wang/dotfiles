@@ -71,7 +71,7 @@ dotfiles/
 | `new-feature.md` | 從發想到部署的完整新功能流程 |
 | `cross-model-review.md` | 三模型交叉檢查（重大決策用） |
 
-未啟用：bug-fix、refactor、tech-evaluation（在 `_drafts/workflows/`）
+未啟用：bug-fix、refactor、tech-evaluation、producer-reviewer-loop（在 `_drafts/workflows/`）
 
 ## Assets（`assets/`）
 

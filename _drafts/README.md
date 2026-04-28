@@ -70,8 +70,9 @@ git 歷史會保留內容，未來真的需要可從歷史撈回。
 - `cursor/commands/review.md` — /review
 - `gemini/README.md` — Gemini 工具配置
 
-### workflows/（3）
+### workflows/（4）
 - `bug-fix.md` — Workflow: Bug 修復
+- `producer-reviewer-loop.md` — Workflow: Producer-Reviewer Loop
 - `refactor.md` — Workflow: 重構
 - `tech-evaluation.md` — Workflow: 技術選型評估
 

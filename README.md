@@ -83,7 +83,18 @@ dotfiles/
 
 ## Tools（`tools/`）
 
-各 AI 工具的設定說明。目前所有具體配置都在 `_drafts/tools/`，等實戰需要時再啟用。
+各 AI 工具的設定說明。已啟用 4 個工具配置，其餘等實戰需要時再啟用。
+
+### 已啟用（4 個）
+
+| 檔案 | 用途 |
+|---|---|
+| `tools/claude/projects/system-architect.md` | Claude Project: 累積架構知識，跨對話保留上下文 |
+| `tools/claude/projects/code-reviewer.md` | Claude Project: 累積代碼風格偏好，做 code review |
+| `tools/chatgpt/custom-gpts/product-thinker.md` | Custom GPT: 模糊想法釐清為 Problem Statement |
+| `tools/chatgpt/custom-gpts/tech-evaluator.md` | Custom GPT: 系統化技術選型評估 |
+
+### 目錄結構
 
 | 路徑 | 用途 |
 |---|---|
@@ -92,6 +103,8 @@ dotfiles/
 | `tools/gemini/` | NotebookLM 與 Deep Research 使用指南 |
 | `tools/cursor/agents/` | Cursor Subagent 定義 |
 | `tools/cursor/commands/` | Cursor 自定義 `/` 指令 |
+
+未啟用：cursor agents/commands、gemini 配置（在 `_drafts/tools/`）
 
 ## Decisions（`decisions/`）
 

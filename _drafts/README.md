@@ -57,11 +57,7 @@ git 歷史會保留內容，未來真的需要可從歷史撈回。
 - `stage-6-reviewer.md` — Stage 6: Reviewer（Code Review）
 - `stage-7-deployer.md` — Stage 7: Deployer（部署）
 
-### tools/（11）
-- `chatgpt/custom-gpts/product-thinker.md` — Custom GPT: Product Thinker
-- `chatgpt/custom-gpts/tech-evaluator.md` — Custom GPT: Tech Evaluator
-- `claude/projects/code-reviewer.md` — Claude Project: Code Reviewer
-- `claude/projects/system-architect.md` — Claude Project: System Architect
+### tools/（7）
 - `cursor/agents/implementer.md` — 根據 spec 和架構文件實作代碼。架構確認後使用。嚴格遵守 spec，不發明功能。
 - `cursor/agents/orchestrator.md` — 協調多階段開發任務。當用戶帶著 spec 或架構文件來實作時使用。委派 implementer、tester、reviewer 子代理。
 - `cursor/agents/reviewer.md` — 代碼品質最終檢查。測試通過後使用。唯讀 — 浮出問題，不修。

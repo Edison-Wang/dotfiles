@@ -35,13 +35,14 @@ dotfiles/
 | `swift-accessibility.mdc` | 無障礙（VoiceOver、Dynamic Type、對比、Reduce Motion） |
 | `swift-dependencies.mdc` | 套件管理（SPM、評估標準、版本鎖定） |
 
-### 工作流程規範（3 條）— `alwaysApply: true`，每次對話都帶入
+### 工作流程規範（4 條）— `alwaysApply: true`，每次對話都帶入
 
 | 檔案 | 主題 |
 |---|---|
 | `workflow-dev-plan.mdc` | 開發前必須有計畫，依計畫執行 |
 | `workflow-git-commit.mdc` | 必須等用戶測試確認後才能 commit |
 | `workflow-language.mdc` | AI 一律以繁體中文回應 |
+| `workflow-completion-evidence.mdc` | 完成主張必須附帶具體證據（檔案範圍、驗證結果、下一步） |
 
 ### 通用規範（2 條）— `alwaysApply: true`，跨所有語言適用
 

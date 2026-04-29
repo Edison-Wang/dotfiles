@@ -126,20 +126,30 @@ fi
 if [ -d "$TARGET/.git" ]; then
   if [ "$USE_GITIGNORE" -eq 1 ]; then
     GI="$TARGET/.gitignore"
-    if [ -f "$GI" ] && grep -qxF "ai/" "$GI" 2>/dev/null; then
-      echo "ℹ️  .gitignore 已含 ai/，跳過"
+    if [ -f "$GI" ]; then
+      if grep -qxF "ai/" "$GI" 2>/dev/null; then
+        echo "ℹ️  .gitignore 已含 ai/，跳過"
+      else
+        echo "➕ 追加到 .gitignore（會進版控）：ai/"
+        run "printf '\nai/\n' >> \"$GI\""
+      fi
     else
-      echo "➕ 寫入 .gitignore（會進版控）：ai/"
-      run "printf '\nai/\n' >> \"$GI\""
+      echo "➕ 建立 .gitignore（會進版控）：ai/"
+      run "printf 'ai/\n' > \"$GI\""
     fi
   else
     EXCL="$TARGET/.git/info/exclude"
-    if [ -f "$EXCL" ] && grep -qxF "ai/" "$EXCL" 2>/dev/null; then
-      echo "ℹ️  .git/info/exclude 已含 ai/，跳過"
+    if [ -f "$EXCL" ]; then
+      if grep -qxF "ai/" "$EXCL" 2>/dev/null; then
+        echo "ℹ️  .git/info/exclude 已含 ai/，跳過"
+      else
+        echo "➕ 追加到 .git/info/exclude（本機，不影響團隊）：ai/"
+        run "printf '\nai/\n' >> \"$EXCL\""
+      fi
     else
-      echo "➕ 寫入 .git/info/exclude（本機，不影響團隊）：ai/"
+      echo "➕ 建立 .git/info/exclude（本機，不影響團隊）：ai/"
       run "mkdir -p \"$TARGET/.git/info\""
-      run "printf '\nai/\n' >> \"$EXCL\""
+      run "printf 'ai/\n' > \"$EXCL\""
     fi
   fi
 else

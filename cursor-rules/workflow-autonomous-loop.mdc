@@ -25,11 +25,14 @@ alwaysApply: false
 
 合法 Status：`IN_PROGRESS` | `NEEDS_PLAN_APPROVAL` | `NEEDS_HUMAN_REVIEW` | `BLOCKED` | `ABORTED`
 
-允許的轉換：
+> **注意**：INIT **不是** Phase 值。它是進入狀態機之前的 preflight 偵測步驟（見下方「INIT」段）。
+> Phase 欄位的初始值就是 `ANALYZE`，永遠不會被寫成 `INIT`。
+> Log 區塊可使用 `INIT → ANALYZE` 作為人類可讀的事件標記，但這不是狀態轉換。
+
+允許的轉換（Phase 之間）：
 
 | 從 | 到 | 條件 |
 |---|---|---|
-| INIT | ANALYZE | CurrentTask 已存在或用戶回答後寫入完成 |
 | ANALYZE | BLUEPRINT | 任務理解完成 |
 | BLUEPRINT | （停下）| 計畫產出 → 設 Status=NEEDS_PLAN_APPROVAL |
 | BLUEPRINT | CONSTRUCT | 用戶口頭確認計畫 |
@@ -41,22 +44,25 @@ alwaysApply: false
 | DELIVER | （停下）| Review 完成 → 設 Status=NEEDS_HUMAN_REVIEW |
 | 任何 | ABORTED | 用戶手動中斷 |
 
-任何不在表上的轉換**禁止**。
+任何不在表上的 Phase 轉換**禁止**。
 
 ## 各階段行為
 
-### INIT（任務偵測，ANALYZE 之前）
+### INIT（preflight 偵測，**不是** Phase）
 
-進入 ANALYZE 之前先檢查 `workflow-state.md`：
+這是進入狀態機**之前**的偵測步驟。Phase 欄位不會變成 INIT，初始值維持 `ANALYZE`。
+INIT 的存在只是為了確保進入 ANALYZE 時 `CurrentTask` 已就緒。
+
+檢查 `workflow-state.md`：
 
 - 若 `CurrentTask` 為 `<unset>` 或空白：
   1. **不要自己編造任務**
   2. 主動詢問用戶：「請告訴我這次的任務是什麼？」
   3. 收到用戶回答後，**自動寫回 `workflow-state.md`**：
      - 把 `CurrentTask:` 改成用戶描述（一句話濃縮，保留關鍵資訊）
-     - 把 `StartedAt:` 填入當前時間（格式 `YYYY-MM-DD HH:MM`，可從系統取得）
-  4. 在 Log 區塊 append：`[time] INIT → ANALYZE | 任務：<摘要>`
-  5. 然後進入 ANALYZE
+     - 把 `StartedAt:` 填入當前時間（格式 `YYYY-MM-DD HH:MM`）
+  4. 在 Log 區塊 append：`[time] INIT → ANALYZE | 任務：<摘要>`（人類可讀的事件標記，不是 Phase 轉換）
+  5. 然後進入 ANALYZE 階段（Phase 維持 `ANALYZE`，本來就是初始值）
 - 若 `CurrentTask` 已填寫（非 `<unset>`）：
   - 直接進入 ANALYZE，不重複詢問
 

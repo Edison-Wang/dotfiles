@@ -1,0 +1,160 @@
+---
+description: ai/workflow-state.md 出現時遵循的五階段自主開發流程（ANALYZE → BLUEPRINT → CONSTRUCT → VALIDATE → DELIVER）
+globs: "**/ai/workflow-state.md"
+alwaysApply: false
+---
+
+# 自主開發迴圈
+
+## 觸發與適用
+
+當對話 context 含 `ai/workflow-state.md` 時啟用本規則。
+這是一份「動態大腦」文件，AI 必須在每個階段轉換時讀寫它。
+
+## 核心原則
+
+1. **狀態驅動** — 每次行動前先讀 `workflow-state.md` 的 State 區塊，操作後更新
+2. **強制停下點** — Status 為 `NEEDS_PLAN_APPROVAL`、`NEEDS_HUMAN_REVIEW`、`BLOCKED` 時必須停下回報，等用戶確認
+3. **可退回** — CONSTRUCT 中發現 BLUEPRINT 有錯，必須退回 BLUEPRINT 並在 Log 標記原因，禁止擅自改 Plan 繼續
+4. **失敗計數** — VALIDATE 失敗即遞增 `ValidateAttempts`，達 3 強制 BLOCKED
+5. **證據優先** — 每次狀態變更需附驗證證據（檔案 + 行數 / build / test 結果），對齊 `workflow-completion-evidence.mdc`
+
+## 狀態機
+
+合法 Phase：`ANALYZE` | `BLUEPRINT` | `CONSTRUCT` | `VALIDATE` | `DELIVER` | `BLOCKED`
+
+合法 Status：`IN_PROGRESS` | `NEEDS_PLAN_APPROVAL` | `NEEDS_HUMAN_REVIEW` | `BLOCKED` | `ABORTED`
+
+允許的轉換：
+
+| 從 | 到 | 條件 |
+|---|---|---|
+| INIT | ANALYZE | CurrentTask 已存在或用戶回答後寫入完成 |
+| ANALYZE | BLUEPRINT | 任務理解完成 |
+| BLUEPRINT | （停下）| 計畫產出 → 設 Status=NEEDS_PLAN_APPROVAL |
+| BLUEPRINT | CONSTRUCT | 用戶口頭確認計畫 |
+| CONSTRUCT | VALIDATE | 所有 Plan 項目完成 |
+| CONSTRUCT | BLUEPRINT | 發現計畫有錯（必須在 Log 標記原因） |
+| VALIDATE | CONSTRUCT | 失敗且 ValidateAttempts < 3 |
+| VALIDATE | BLOCKED | 失敗且 ValidateAttempts = 3 |
+| VALIDATE | DELIVER | 通過 |
+| DELIVER | （停下）| Review 完成 → 設 Status=NEEDS_HUMAN_REVIEW |
+| 任何 | ABORTED | 用戶手動中斷 |
+
+任何不在表上的轉換**禁止**。
+
+## 各階段行為
+
+### INIT（任務偵測，ANALYZE 之前）
+
+進入 ANALYZE 之前先檢查 `workflow-state.md`：
+
+- 若 `CurrentTask` 為 `<unset>` 或空白：
+  1. **不要自己編造任務**
+  2. 主動詢問用戶：「請告訴我這次的任務是什麼？」
+  3. 收到用戶回答後，**自動寫回 `workflow-state.md`**：
+     - 把 `CurrentTask:` 改成用戶描述（一句話濃縮，保留關鍵資訊）
+     - 把 `StartedAt:` 填入當前時間（格式 `YYYY-MM-DD HH:MM`，可從系統取得）
+  4. 在 Log 區塊 append：`[time] INIT → ANALYZE | 任務：<摘要>`
+  5. 然後進入 ANALYZE
+- 若 `CurrentTask` 已填寫（非 `<unset>`）：
+  - 直接進入 ANALYZE，不重複詢問
+
+### ANALYZE（理解）
+
+- **讀**：`workflow-state.md` + CurrentTask 描述 + 相關 spec / 程式碼
+- **產**：對任務的理解摘要（口頭回報，不寫檔）
+- **限**：不修改任何檔案（INIT 階段已完成的寫入除外）
+- **下一步**：自動進 BLUEPRINT
+
+### BLUEPRINT（規劃）
+
+- **產**：可勾選的 checklist 寫入 `workflow-state.md` 的 Plan 區塊
+- **要求**：
+  - 每項要可獨立驗證（不能寫「優化效能」這種模糊條目）
+  - 標記依賴順序（A → B 表示 B 依賴 A）
+  - 識別風險與需用戶決策的點
+- **完成**：設 `Phase=BLUEPRINT, Status=NEEDS_PLAN_APPROVAL`
+- **強制停下**：回報計畫概要，等用戶說「OK / 通過 / 開始 / 確認」之類的明確指示
+
+### CONSTRUCT（實作）
+
+- **行為**：逐項實作 Plan，每項完成立即在 checklist 打勾並追加證據
+- **限**：
+  - 嚴格按 Plan，不發明 Plan 外的功能
+  - 不引入未在 Plan 中核准的依賴
+  - 套用 `cursor-rules/` 的代碼風格（語言別專用規則會自動觸發）
+  - 每項完成後跑該檔案的 lint / build 確認沒破壞
+- **發現 Plan 有錯**：
+  - 立即停止實作
+  - 設 `Phase=BLUEPRINT, Status=NEEDS_PLAN_APPROVAL`
+  - 在 Log append：`[time] CONSTRUCT → BLUEPRINT | 原因：...`
+  - 提出修訂版 Plan 等用戶確認
+- **完成所有 Plan 項目**：自動進 VALIDATE
+
+### VALIDATE（驗證）
+
+- **行為**：跑完整 build + lint + test
+- **失敗分類**（對齊 `_drafts/tools/cursor/agents/tester.md`）：
+  - Production code bug → 回 CONSTRUCT 修
+  - Test 自己的問題 → 直接修，不算失敗輪次
+  - 既有失敗（與本次改動無關）→ 標記不算失敗輪次
+- **失敗處理**：
+  - `ValidateAttempts += 1`，記錄到 Log
+  - 若 < 3 → 設 `Phase=CONSTRUCT, Status=IN_PROGRESS`，回去修
+  - 若 = 3 → 設 `Phase=BLOCKED, Status=BLOCKED`，停下等人介入
+- **通過**：自動進 DELIVER
+
+### DELIVER（交付 review）
+
+- **行為**：五層 review（對齊 `_drafts/tools/cursor/agents/reviewer.md`）
+  1. Spec / Plan 一致性
+  2. 架構一致性
+  3. 正確性（邏輯、邊界、error handling）
+  4. 品質（命名、複雜度、測試覆蓋）
+  5. 安全性（輸入驗證、敏感資料、依賴風險）
+- **產**：Review 摘要，每個 finding 分 Blocker / Major / Minor，附檔案行號
+- **完成**：設 `Phase=DELIVER, Status=NEEDS_HUMAN_REVIEW`
+- **強制停下**：回報變更清單 + 測試結果 + Review findings，等用戶測試確認，**不可自動 commit**
+
+### BLOCKED
+
+- 回報目前卡點、嘗試過的方法、需要用戶決策的問題
+- 等用戶把 Status 改回 `IN_PROGRESS` 或調整 Plan 後才能繼續
+
+## 回報格式
+
+每次階段轉換時的回報模板：
+
+```
+✅ Phase X 完成 → Phase Y
+- 改動：[檔案 + 行數]
+- 驗證：[build/test 結果]
+- 下一步：[等用戶確認 / 自動進入 Y]
+```
+
+進度顯示用：
+
+```
+✅ ANALYZE
+✅ BLUEPRINT（已確認）
+🔄 CONSTRUCT 3/7
+⏸️ VALIDATE
+⏸️ DELIVER
+```
+
+## 與既有 rules 的協作
+
+- **`workflow-dev-plan.mdc`**：BLUEPRINT 即計畫階段，滿足「開發前必須有計畫」
+- **`workflow-git-commit.mdc`**：DELIVER 後等用戶確認才 commit；本規則不取代 git commit 流程
+- **`workflow-completion-evidence.mdc`**：每階段轉換的回報自動含「改了什麼 / 怎麼驗證 / 下一步」三要素
+- **`workflow-language.mdc`**：所有回報用繁體中文
+- **`general-comments.mdc`**、**`general-security.mdc`**：CONSTRUCT 階段套用
+
+## 反模式
+
+- **禁止** Status 是 `NEEDS_*` 時還繼續行動
+- **禁止** CONSTRUCT 中改 Plan 卻不退回 BLUEPRINT
+- **禁止** VALIDATE 沒過就跳 DELIVER
+- **禁止** DELIVER 後自動 commit
+- **禁止** 把 IN_PROGRESS 寫成完成卻沒附驗證證據

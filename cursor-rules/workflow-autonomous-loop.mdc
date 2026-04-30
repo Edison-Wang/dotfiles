@@ -101,7 +101,7 @@ INIT 的存在只是為了確保進入 ANALYZE 時 `CurrentTask` 已就緒。
 ### VALIDATE（驗證）
 
 - **行為**：跑完整 build + lint + test
-- **失敗分類**（對齊 `_drafts/tools/cursor/agents/tester.md`）：
+- **失敗分類**（對齊 `cursor-agents/test-writer.md`）：
   - Production code bug → 回 CONSTRUCT 修
   - Test 自己的問題 → 直接修，不算失敗輪次
   - 既有失敗（與本次改動無關）→ 標記不算失敗輪次
@@ -113,7 +113,7 @@ INIT 的存在只是為了確保進入 ANALYZE 時 `CurrentTask` 已就緒。
 
 ### DELIVER（交付 review）
 
-- **行為**：五層 review（對齊 `_drafts/tools/cursor/agents/reviewer.md`）
+- **行為**：五層 review（對齊 `cursor-agents/code-reviewer.md`）
   1. Spec / Plan 一致性
   2. 架構一致性
   3. 正確性（邏輯、邊界、error handling）
@@ -127,6 +127,79 @@ INIT 的存在只是為了確保進入 ANALYZE 時 `CurrentTask` 已就緒。
 
 - 回報目前卡點、嘗試過的方法、需要用戶決策的問題
 - 等用戶把 Status 改回 `IN_PROGRESS` 或調整 Plan 後才能繼續
+
+## Spec-driven 變體
+
+當任務描述含 spec / architecture 文件路徑（如 `docs/specs/auth.md`、`docs/architecture/`、用戶口頭說「依這份 spec 實作」），啟用此變體。
+它**不取代**五階段流程，只調整每階段的輸入與委派策略。
+
+### 觸發判定
+
+任一條件成立即啟用：
+
+- CurrentTask 含 `docs/specs/` 或 `docs/architecture/` 路徑
+- CurrentTask 含「實作 spec / 依 spec / 依架構文件 / 執行 architecture」等字眼
+- 用戶在對話中明確提供 spec 文件路徑
+
+找不到指定的 spec 文件 → **不要自己發明路徑**，停下問用戶。
+
+### 各階段調整
+
+| Phase | 預設行為 | Spec-driven 變體 |
+|---|---|---|
+| ANALYZE | 自行分析任務 | 以 spec 為主要輸入；不重新分析需求；只摘要 spec 範圍與依賴 |
+| BLUEPRINT | 從理解推導 checklist | 直接從 spec 的實作順序推導 checklist；scope 嚴格對齊 spec |
+| CONSTRUCT | 主 agent 自行實作 | 若 `cursor-agents/code-coder.md` 存在 → 委派 `@code-coder`；否則自行實作但遵守 code-coder 規則（嚴格遵守 spec、不重構 scope 外） |
+| VALIDATE | 主 agent 跑 build + lint + test | 若 `cursor-agents/test-writer.md` 存在 → 委派 `@test-writer` 補測試 + 跑套件；否則照舊 |
+| DELIVER | 主 agent 做五層 review | 若 `cursor-agents/code-reviewer.md` 存在 → 委派 `@code-reviewer`（readonly 強制）；否則照舊 |
+
+### 委派時的補充規則
+
+- **委派只發生在 CONSTRUCT / VALIDATE / DELIVER**，ANALYZE 與 BLUEPRINT 永遠由主 agent 處理（要與用戶互動確認）
+- **委派前必須附帶輸入**（subagent 上下文是隔離的，看不到完整對話）：
+  - `@code-coder`：spec 路徑 / BLUEPRINT plan 條目 / 明確需求描述（三選一）
+  - `@test-writer`：改動範圍 / 指定測試目標 / 上一階段 code-coder 的完成回報（三選一）
+  - `@code-reviewer`：git diff / 檔案清單 / 上一階段的完成回報（三選一）
+  - 三者都沒有時 subagent 會拒絕執行（其 frontmatter 內含 Pre-flight 自我檢查），主 agent 應在委派前先補齊
+- 委派 subagent 後，主 agent 仍負責更新 `workflow-state.md`（subagent 不寫 state）
+- subagent 失敗 3 次 → 升級為 BLOCKED，**不要繼續硬刷**
+- 委派事件記入 Log：`[time] CONSTRUCT 模組 X 委派 @code-coder`
+
+### 反模式（變體專屬）
+
+- **禁止** spec 沒提到就自己加功能（code-coder 規則：spec 沒說的就停下問）
+- **禁止** 為了符合 spec 而擅改既有不相關代碼
+- **禁止** code-reviewer subagent 修檔（readonly 強制）
+- **禁止** 找不到 spec 卻憑記憶或臆測「應該長這樣」開始實作
+
+## 模型選擇建議（非強制）
+
+模型分配影響成本、速度、品質。以下為「組合 A：CP 值最佳」推薦，適合日常 agentic 開發：
+
+| 角色 | 推薦模型 | 理由 |
+|---|---|---|
+| 主 agent（執行此 rule） | `Composer-2` | Cursor 自家、最快、最便宜，擅長協調委派 |
+| `@code-coder` | `gpt-5.3-codex` | 為 agentic coding 訓練，寫代碼專精 |
+| `@test-writer` | `claude-4.6-sonnet` | 平衡穩定，理解測試框架 |
+| `@code-reviewer` | `claude-4.7-opus-thinking` | 深度推理找盲點 |
+
+- 主 agent 在 Cursor IDE 右下角 model picker 切換
+- subagent 在 `cursor-agents/*.md` 的 frontmatter `model:` 欄位設定
+
+### 階段性評估（每 1-2 週回顧）
+
+| 觀察到的問題 | 調整方向 |
+|---|---|
+| 主 agent 規劃方向常偏 / 拆 plan 不夠細 | 主 agent 升 `gpt-5.5-medium` 或 `claude-4.7-opus-thinking` |
+| code-coder 實作品質不穩 / 偏離 spec | 改 `claude-4.6-sonnet` 或升 `claude-4.7-opus-thinking` |
+| code-reviewer false positive 太多 / 太雜 | 改 `gpt-5.3-codex` 或 `claude-4.6-sonnet` |
+| 成本壓力大 / 想跑大量並行 | 全部降階為 `composer-2-fast` |
+
+### 平台限制
+
+- **Usage-based plan**（Pro / Pro Plus / Ultra）：subagent `model:` 設定會被正常 honor，**無 Max Mode 限制**
+- **Legacy request-based plan**：GPT-5.3 Codex / Claude 4.6+ Sonnet / Claude 4.6+ Opus 需要 Max Mode，否則 subagent 會 fallback 到 Composer
+- 不確定自己是哪種 plan → Cursor Settings → Billing 查看
 
 ## 回報格式
 

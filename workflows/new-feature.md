@@ -34,7 +34,7 @@
 **產出:** 實際代碼，逐模組 commit
 
 ### Stage 6: Review（30-60 分鐘）
-**工具:** Cursor reviewer subagent + Claude Project「Code Reviewer」
+**工具:** Cursor code-reviewer subagent + Claude Project「Code Reviewer」
 **Prompt:** `_drafts/prompts/stage-6-reviewer.md`（尚未啟用）
 **產出:** Review 紀錄，修復後合併
 
@@ -47,7 +47,7 @@
 
 - **跳過 Stage 1**: 做出來才發現搞錯問題。永遠花 15 分鐘在這。
 - **跳過 Stage 4**: 實作過程中架構漂移。即使一頁的架構文件也有幫助。
-- **讓 implementer 一口氣做完所有模組**: 偏差會累積。每個模組都要 checkpoint。
+- **讓 code-coder 一口氣做完所有模組**: 偏差會累積。每個模組都要 checkpoint。
 - **只在最後才 review**: 晚期 review = 昂貴的重工。盡可能逐模組 review。
 
 ## 備註

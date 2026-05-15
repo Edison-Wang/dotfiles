@@ -7,6 +7,7 @@
 ```
 dotfiles/
 ├── cursor-rules/          # Cursor 全域規則（15 條 .mdc，symlink 到 ~/.cursor/rules/）
+├── cursor-skills/         # Cursor Agent Skills（按需複製或 symlink 到 ~/.cursor/skills/）
 ├── prompts/               # 工具無關的 prompt 模板（按 SDLC 階段）
 ├── tools/                 # 工具特定配置（Claude Projects、Custom GPTs、Cursor agents）
 ├── workflows/             # 跨工具的端到端工作流程
@@ -50,6 +51,16 @@ dotfiles/
 |---|---|
 | `general-security.mdc` | secret 管理、Keychain、洩漏處理 |
 | `general-comments.mdc` | 註解寫 why 不寫 what、禁止廢話註解、TODO 規範 |
+
+## Cursor Skills（`cursor-skills/`）
+
+Agent Skills：可複製到 `~/.cursor/skills/<name>/` 或專案 `.cursor/skills/`，詳見各目錄內 `SKILL.md` 的安裝說明。
+
+| 目錄 | 用途 |
+|---|---|
+| `release-delta-from-baseline/` | 自 git 基線對 `dev` 產出簡中 Release 文案，並回寫 `release-baseline.txt` + `CHANGELOG.md` 當前基線行 |
+
+其餘：`codebase-onboarding`、`cross-model-review`、`init-ai-workflow`、`producer-reviewer-loop`。
 
 ## Prompts（`prompts/`）
 

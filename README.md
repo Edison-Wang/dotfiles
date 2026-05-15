@@ -58,7 +58,7 @@ Agent Skills：可複製到 `~/.cursor/skills/<name>/` 或專案 `.cursor/skills
 
 | 目錄 | 用途 |
 |---|---|
-| `release-delta-from-baseline/` | 自 git 基線對 `dev` 產出簡中 Release 文案，並回寫 `release-baseline.txt` + `CHANGELOG.md` 當前基線行 |
+| `release-delta-from-baseline/` | Skill 本體**繁中 + 英文**說明；自 git 基線對 `dev` 產出 Release 條列（語言**依專案 CHANGELOG 慣例**），並回寫 `release-baseline.txt` + `CHANGELOG` 基線行 |
 
 其餘：`codebase-onboarding`、`cross-model-review`、`init-ai-workflow`、`producer-reviewer-loop`。
 
